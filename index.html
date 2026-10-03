@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Food Budget</title>
+<style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        
+        /* Stop pull-to-refresh and overscroll bounce on mobile */
+        body { background-color: #f4f4f9; color: #333; overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
+        #app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; /* Uses dynamic viewport height for mobile browsers */ }
+        
+        header { background: #2c3e50; color: white; padding: env(safe-area-inset-top, 20px) 20px 20px; text-align: center; }
+        
+        /* Allow wrapping if screen is very narrow */
+        .budget-setup { margin-top: 15px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
+        .budget-setup input { flex: 1; min-width: 150px; padding: 12px; border-radius: 8px; border: none; font-size: 1rem; min-height: 48px; }
+        .budget-setup button { padding: 12px 24px; border-radius: 8px; border: none; background: #27ae60; color: white; font-weight: bold; font-size: 1rem; cursor: pointer; min-height: 48px; transition: background 0.2s;}
+        
+        /* General Buttons */
+        .budget-setup button:active, #add-expense-btn:active { background: #219653; transform: scale(0.98); }
+        
+        main { flex: 1; overflow-y: auto; padding: 20px; padding-bottom: 100px; /* Extra padding for bottom nav */ }
+        .view { display: none; animation: fadeIn 0.25s ease-out; }
+        .view.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .card { background: white; padding: 25px 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); text-align: center; margin-bottom: 20px; }
+        .remaining { font-size: 2.8rem; color: #27ae60; margin: 10px 0; font-weight: 800; letter-spacing: -1px; }
+        .subtitle { font-size: 0.9rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;}
+        
+        .add-expense, .history { background: white; padding: 20px; border-radius: 16px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .add-expense h3, .history h3 { margin-bottom: 15px; font-size: 1.2rem; color: #2c3e50; }
+        
+        /* Mobile-first input group: Stacks elements cleanly */
+        .input-group { display: flex; flex-direction: column; gap: 12px; }
+        .input-row { display: flex; gap: 12px; }
+        .input-row input { flex: 2; }
+        .input-row select { flex: 1; }
+        .input-group input, .input-group select, #add-expense-btn { 
+            padding: 12px; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            font-size: 1rem; 
+            background: #fafafa;
+            min-height: 48px; /* Standard mobile touch target */
+        }
+        
+        /* Make the Add button prominent */
+        #add-expense-btn { background: #2c3e50; color: white; border: none; font-weight: bold; font-size: 1.1rem; }
+        
+        #expense-list { list-style: none; }
+        #expense-list li { display: flex; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid #f0f0f0; font-size: 1.05rem;}
+        #expense-list li:last-child { border-bottom: none; padding-bottom: 0; }
+        .type-Grocery { color: #2980b9; font-weight: 600; }
+        .type-Takeout { color: #e74c3c; font-weight: 600; }
+        
+        /* Bottom Nav respecting mobile safe areas */
+        .bottom-nav { 
+            position: fixed; 
+            bottom: 0; 
+            width: 100%; 
+            background: white; 
+            display: flex; 
+            box-shadow: 0 -4px 15px rgba(0,0,0,0.05); 
+            padding-bottom: env(safe-area-inset-bottom, 0); 
+            z-index: 10;
+        }
+        .nav-btn { flex: 1; padding: 18px; border: none; background: none; font-size: 1rem; color: #95a5a6; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .nav-btn.active { color: #2c3e50; }
+        .nav-btn.active::after {
+            content: '';
+            display: block;
+            width: 40px;
+            height: 4px;
+            background: #2c3e50;
+            border-radius: 4px;
+            margin: 4px auto 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h2>Food Budget</h2>
+            <div class="budget-setup">
+                <input type="number" id="monthly-budget-input" placeholder="Set Monthly Limit">
+                <button id="set-budget-btn">Set</button>
+            </div>
+        </header>
+        
+        <main>
+            <!-- Month View -->
+            <section id="month-view" class="view active">
+                <div class="card">
+                    <p>Monthly Budget: <span id="month-total">0.00</span></p>
+                    <p>Spent: <span id="month-spent">0.00</span></p>
+                    <h1 id="month-remaining" class="remaining">0.00</h1>
+                    <p class="subtitle">Remaining this month</p>
+                </div>
+            </section>
+            
+            <!-- Week View -->
+            <section id="week-view" class="view">
+                <div class="card">
+                    <p>Weekly Budget: <span id="week-total">0.00</span></p>
+                    <p>Spent (Last 7 Days): <span id="week-spent">0.00</span></p>
+                    <h1 id="week-remaining" class="remaining">0.00</h1>
+                    <p class="subtitle">Remaining this week</p>
+                </div>
+            </section>
+            
+          <section class="add-expense">
+                <h3>Add Expense</h3>
+                <div class="input-group">
+                    <div class="input-row">
+                        <input type="number" id="expense-amount" placeholder="Amount" inputmode="decimal">
+                        <select id="expense-type">
+                            <option value="Grocery">Grocery</option>
+                            <option value="Takeout">Takeout</option>
+                        </select>
+                    </div>
+                    <button id="add-expense-btn">Add Expense</button>
+                </div>
+            </section>
+            
+            <section class="history">
+                <h3>Recent History</h3>
+                <ul id="expense-list"></ul>
+            </section>
+        </main>
+        
+        <nav class="bottom-nav">
+            <button class="nav-btn active" data-target="month-view">Month</button>
+            <button class="nav-btn" data-target="week-view">Week</button>
+        </nav>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // State
+            let monthlyBudget = parseFloat(localStorage.getItem('monthlyBudget')) || 0;
+            let expenses = JSON.parse(localStorage.getItem('expenses')) || [];
+            
+            // DOM Elements
+            const elements = {
+                budgetInput: document.getElementById('monthly-budget-input'),
+                setBudgetBtn: document.getElementById('set-budget-btn'),
+                monthTotal: document.getElementById('month-total'),
+                monthSpent: document.getElementById('month-spent'),
+                monthRemaining: document.getElementById('month-remaining'),
+                weekTotal: document.getElementById('week-total'),
+                weekSpent: document.getElementById('week-spent'),
+                weekRemaining: document.getElementById('week-remaining'),
+                expenseList: document.getElementById('expense-list'),
+                navBtns: document.querySelectorAll('.nav-btn'),
+                views: document.querySelectorAll('.view')
+            };
+            
+            // Load existing budget into input field
+            if (monthlyBudget > 0) {
+                elements.budgetInput.value = monthlyBudget;
+            }
+            
+            // Navigation Logic
+            elements.navBtns.forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    elements.navBtns.forEach(b => b.classList.remove('active'));
+                    elements.views.forEach(v => v.classList.remove('active'));
+                    
+                    const targetBtn = e.currentTarget;
+                    targetBtn.classList.add('active');
+                    document.getElementById(targetBtn.dataset.target).classList.add('active');
+                });
+            });
+            
+            // Set Budget
+            elements.setBudgetBtn.addEventListener('click', () => {
+                const inputVal = elements.budgetInput.value;
+                if (inputVal && !isNaN(inputVal)) {
+                    monthlyBudget = parseFloat(inputVal);
+                    localStorage.setItem('monthlyBudget', monthlyBudget);
+                    
+                    // Visual feedback
+                    const originalText = elements.setBudgetBtn.textContent;
+                    elements.setBudgetBtn.textContent = 'Saved!';
+                    elements.setBudgetBtn.style.background = '#219653';
+                    
+                    setTimeout(() => {
+                        elements.setBudgetBtn.textContent = originalText;
+                        elements.setBudgetBtn.style.background = '#27ae60';
+                    }, 1000);
+                    
+                    updateUI();
+                }
+            });
+            
+            // Add Expense
+            document.getElementById('add-expense-btn').addEventListener('click', () => {
+                const amountInput = document.getElementById('expense-amount');
+                const amount = parseFloat(amountInput.value);
+                const type = document.getElementById('expense-type').value;
+                
+                if (amount && amount > 0) {
+                    const expense = {
+                        id: Date.now(),
+                        amount: amount,
+                        type: type,
+                        date: new Date().toISOString()
+                    };
+                    expenses.push(expense);
+                    localStorage.setItem('expenses', JSON.stringify(expenses));
+                    
+                    amountInput.value = ''; 
+                    updateUI();
+                }
+            });
+            
+            // Update UI Logic
+            function updateUI() {
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+                
+                // Calculate Monthly Data
+                const monthExpenses = expenses.filter(e => {
+                    const d = new Date(e.date);
+                    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                });
+                const monthSpent = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
+                
+                // Calculate Weekly Data (rolling 7 days)
+                const weeklyBudget = monthlyBudget / 4.33;
+                const oneWeekAgo = new Date();
+                oneWeekAgo.setDate(now.getDate() - 7);
+                
+                const weekExpenses = expenses.filter(e => new Date(e.date) >= oneWeekAgo);
+                const weekSpent = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
+                
+                // Update DOM (Month)
+                elements.monthTotal.textContent = monthlyBudget.toFixed(2);
+                elements.monthSpent.textContent = monthSpent.toFixed(2);
+                elements.monthRemaining.textContent = (monthlyBudget - monthSpent).toFixed(2);
+                
+                // Update DOM (Week)
+                elements.weekTotal.textContent = weeklyBudget.toFixed(2);
+                elements.weekSpent.textContent = weekSpent.toFixed(2);
+                elements.weekRemaining.textContent = (weeklyBudget - weekSpent).toFixed(2);
+                
+                // Update Colors
+                elements.monthRemaining.style.color = (monthlyBudget - monthSpent) < 0 ? '#e74c3c' : '#27ae60';
+                elements.weekRemaining.style.color = (weeklyBudget - weekSpent) < 0 ? '#e74c3c' : '#27ae60';
+                
+                // Render History
+                elements.expenseList.innerHTML = '';
+                [...expenses].reverse().slice(0, 10).forEach(e => {
+                    const dateStr = new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    const li = document.createElement('li');
+                    li.innerHTML = `
+                        <span><span class="type-${e.type}">${e.type}</span> - ${dateStr}</span>
+                        <strong>-${e.amount.toFixed(2)}</strong>
+                    `;
+                    elements.expenseList.appendChild(li);
+                });
+            }
+            
+            updateUI();
+        });
+    </script>
+</body>
+</html>
