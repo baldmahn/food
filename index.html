@@ -204,19 +204,33 @@
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
             
-            // Calculate Monthly Data
+            // 1. Calculate Monthly Data
             const monthExpenses = expenses.filter(e => {
                 const d = new Date(e.date);
                 return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
             });
             const monthSpent = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
             
-            // Calculate Weekly Data (rolling 7 days)
+            // 2. Calculate Weekly Data (Calendar Week: Mon - Sun)
             const weeklyBudget = monthlyBudget / 4.33;
-            const oneWeekAgo = new Date();
-            oneWeekAgo.setDate(now.getDate() - 7);
             
-            const weekExpenses = expenses.filter(e => new Date(e.date) >= oneWeekAgo);
+            // Determine the start of the current week (Monday at 00:00:00)
+            const startOfWeek = new Date(now);
+            const dayOfWeek = startOfWeek.getDay(); // 0 is Sunday, 1 is Monday, etc.
+            const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
+            
+            startOfWeek.setDate(startOfWeek.getDate() - distanceToMonday);
+            startOfWeek.setHours(0, 0, 0, 0);
+
+            // Determine the end of the current week (Sunday at 23:59:59)
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            endOfWeek.setHours(23, 59, 59, 999);
+            
+            const weekExpenses = expenses.filter(e => {
+                const d = new Date(e.date);
+                return d >= startOfWeek && d <= endOfWeek;
+            });
             const weekSpent = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
             
             const monthRemaining = monthlyBudget - monthSpent;
