@@ -135,7 +135,7 @@
     <!-- Feedback -->
     <div class="toast" id="toast">Saved!</div>
 
-    <script>
+   <script>
         // State
         let monthlyBudget = parseFloat(localStorage.getItem('foodBudget_Limit')) || 0;
         let expenses = JSON.parse(localStorage.getItem('foodBudget_History')) || [];
@@ -211,22 +211,44 @@
             });
             const monthSpent = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
             
-            // 2. Calculate Weekly Data (Calendar Week: Mon - Sun)
-            const weeklyBudget = monthlyBudget / 4.33;
-            
-            // Determine the start of the current week (Monday at 00:00:00)
+            // 2. Week Boundaries (Monday - Sunday)
             const startOfWeek = new Date(now);
-            const dayOfWeek = startOfWeek.getDay(); // 0 is Sunday, 1 is Monday, etc.
+            const dayOfWeek = startOfWeek.getDay(); // 0 is Sunday, 1 is Monday
             const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
             
             startOfWeek.setDate(startOfWeek.getDate() - distanceToMonday);
             startOfWeek.setHours(0, 0, 0, 0);
 
-            // Determine the end of the current week (Sunday at 23:59:59)
             const endOfWeek = new Date(startOfWeek);
             endOfWeek.setDate(startOfWeek.getDate() + 6);
             endOfWeek.setHours(23, 59, 59, 999);
             
+            // 3. Dynamic "Smooth" Weekly Budget Calculation
+            const startOfMonth = new Date(currentYear, currentMonth, 1);
+            const nextMonth = new Date(currentYear, currentMonth + 1, 1);
+            const daysInMonth = Math.round((nextMonth - startOfMonth) / (1000 * 60 * 60 * 24));
+            
+            // Cap startOfWeek to the 1st of the month if the week overlaps from the previous month
+            const effectiveStartOfWeek = startOfWeek < startOfMonth ? startOfMonth : startOfWeek;
+            
+            // Find what was spent in the month BEFORE this week started
+            const pastExpenses = monthExpenses.filter(e => new Date(e.date) < effectiveStartOfWeek);
+            const pastSpent = pastExpenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            // Determine budget remaining at the moment this week started
+            const budgetAtStartOfWeek = monthlyBudget - pastSpent;
+            
+            // Determine how many days are left in the month from the start of the week
+            const daysLeftFromStart = daysInMonth - effectiveStartOfWeek.getDate() + 1;
+            
+            // Calculate pace: Divide remaining money by remaining days, scale to a 7-day week. 
+            // (Math.max prevents negative budgets if you completely blew past the monthly limit)
+            let weeklyBudget = (Math.max(0, budgetAtStartOfWeek) / daysLeftFromStart) * 7;
+            
+            // Cap the weekly budget so it doesn't show an allowance higher than your actual remaining month funds
+            weeklyBudget = Math.min(weeklyBudget, Math.max(0, budgetAtStartOfWeek));
+            
+            // 4. Current Week Expenditures
             const weekExpenses = expenses.filter(e => {
                 const d = new Date(e.date);
                 return d >= startOfWeek && d <= endOfWeek;
@@ -255,9 +277,9 @@
             listEl.innerHTML = '';
             
             if (expenses.length === 0) {
-                listEl.innerHTML = '<li style="color: var(--text-muted); justify-content: center;">No expenses yet.</li>';
+                listEl.innerHTML = '<li style="color: var(--text-muted); justify-content: center; padding: 20px 0;">No expenses yet.</li>';
             } else {
-                [...expenses].reverse().slice(0, 10).forEach(e => {
+                [...expenses].reverse().slice(0, 15).forEach(e => {
                     const dateStr = new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                     const li = document.createElement('li');
                     li.innerHTML = `
