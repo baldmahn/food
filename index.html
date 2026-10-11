@@ -108,6 +108,12 @@
             <label>Remaining This Week</label>
             <h1 id="week-remaining" class="remaining">0.00</h1>
             <p class="rate-display">Allowance: <span id="week-total">0.00</span> &bull; Spent: <span id="week-spent">0.00</span></p>
+            
+            <!-- NEW: Daily Pacemaker -->
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-light);">
+                <label>Safe to spend today</label>
+                <h2 id="daily-safe" style="color: var(--text-main); font-size: 1.5rem; margin-top: 5px;">0.00</h2>
+            </div>
         </div>
     </div>
 
@@ -135,7 +141,7 @@
     <!-- Feedback -->
     <div class="toast" id="toast">Saved!</div>
 
-   <script>
+    <script>
         // State
         let monthlyBudget = parseFloat(localStorage.getItem('foodBudget_Limit')) || 0;
         let expenses = JSON.parse(localStorage.getItem('foodBudget_History')) || [];
@@ -204,18 +210,23 @@
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
             
-            // 1. Calculate Monthly Data
+            // 1. Exact Month boundaries
+            const startOfMonth = new Date(currentYear, currentMonth, 1);
+            const monthEnd = new Date(currentYear, currentMonth + 1, 0);
+            monthEnd.setHours(23, 59, 59, 999);
+            
+            // Filter strictly to this month
             const monthExpenses = expenses.filter(e => {
                 const d = new Date(e.date);
                 return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
             });
             const monthSpent = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
+            const monthRemaining = monthlyBudget - monthSpent;
             
-            // 2. Week Boundaries (Monday - Sunday)
+            // 2. Week boundaries (Mon - Sun)
             const startOfWeek = new Date(now);
-            const dayOfWeek = startOfWeek.getDay(); // 0 is Sunday, 1 is Monday
+            const dayOfWeek = startOfWeek.getDay(); 
             const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
-            
             startOfWeek.setDate(startOfWeek.getDate() - distanceToMonday);
             startOfWeek.setHours(0, 0, 0, 0);
 
@@ -223,40 +234,37 @@
             endOfWeek.setDate(startOfWeek.getDate() + 6);
             endOfWeek.setHours(23, 59, 59, 999);
             
-            // 3. Dynamic "Smooth" Weekly Budget Calculation
-            const startOfMonth = new Date(currentYear, currentMonth, 1);
-            const nextMonth = new Date(currentYear, currentMonth + 1, 1);
-            const daysInMonth = Math.round((nextMonth - startOfMonth) / (1000 * 60 * 60 * 24));
+            // 3. Robust "Smooth" Weekly Allowance (Handles Month Overlaps Flawlessly)
+            const overlapStart = Math.max(startOfWeek.getTime(), startOfMonth.getTime());
+            const overlapEnd = Math.min(endOfWeek.getTime(), monthEnd.getTime());
+            const daysInThisWeek = Math.round((overlapEnd - overlapStart) / 86400000);
             
-            // Cap startOfWeek to the 1st of the month if the week overlaps from the previous month
-            const effectiveStartOfWeek = startOfWeek < startOfMonth ? startOfMonth : startOfWeek;
-            
-            // Find what was spent in the month BEFORE this week started
+            const effectiveStartOfWeek = new Date(overlapStart);
             const pastExpenses = monthExpenses.filter(e => new Date(e.date) < effectiveStartOfWeek);
             const pastSpent = pastExpenses.reduce((sum, e) => sum + e.amount, 0);
             
-            // Determine budget remaining at the moment this week started
             const budgetAtStartOfWeek = monthlyBudget - pastSpent;
+            const daysLeftFromStart = Math.round((monthEnd.getTime() - overlapStart) / 86400000);
             
-            // Determine how many days are left in the month from the start of the week
-            const daysLeftFromStart = daysInMonth - effectiveStartOfWeek.getDate() + 1;
-            
-            // Calculate pace: Divide remaining money by remaining days, scale to a 7-day week. 
-            // (Math.max prevents negative budgets if you completely blew past the monthly limit)
-            let weeklyBudget = (Math.max(0, budgetAtStartOfWeek) / daysLeftFromStart) * 7;
-            
-            // Cap the weekly budget so it doesn't show an allowance higher than your actual remaining month funds
-            weeklyBudget = Math.min(weeklyBudget, Math.max(0, budgetAtStartOfWeek));
+            // Calculate pace based on the snapshot of the month BEFORE this week started
+            const dailyRateAtStartOfWeek = Math.max(0, budgetAtStartOfWeek) / daysLeftFromStart;
+            const weeklyBudget = dailyRateAtStartOfWeek * daysInThisWeek;
             
             // 4. Current Week Expenditures
-            const weekExpenses = expenses.filter(e => {
+            const weekExpenses = monthExpenses.filter(e => {
                 const d = new Date(e.date);
                 return d >= startOfWeek && d <= endOfWeek;
             });
             const weekSpent = weekExpenses.reduce((sum, e) => sum + e.amount, 0);
-            
-            const monthRemaining = monthlyBudget - monthSpent;
             const weekRemaining = weeklyBudget - weekSpent;
+            
+            // 5. NEW: Daily Safe to Spend Pacing
+            const today = new Date(now);
+            today.setHours(0, 0, 0, 0);
+            const daysLeftInWeek = Math.round((overlapEnd - Math.max(overlapStart, today.getTime())) / 86400000);
+            
+            // Divides remaining weekly money by remaining days in the week
+            const safeToSpendToday = weekRemaining > 0 ? weekRemaining / Math.max(1, daysLeftInWeek) : 0;
 
             // Update DOM (Month)
             document.getElementById('month-total').textContent = monthlyBudget.toFixed(2);
@@ -267,10 +275,12 @@
             document.getElementById('week-total').textContent = weeklyBudget.toFixed(2);
             document.getElementById('week-spent').textContent = weekSpent.toFixed(2);
             document.getElementById('week-remaining').textContent = weekRemaining.toFixed(2);
+            document.getElementById('daily-safe').textContent = safeToSpendToday.toFixed(2);
             
             // Update Colors (Switch to danger red if negative)
             document.getElementById('month-remaining').style.color = monthRemaining < 0 ? 'var(--danger-red)' : 'var(--accent-green)';
             document.getElementById('week-remaining').style.color = weekRemaining < 0 ? 'var(--danger-red)' : 'var(--accent-green)';
+            document.getElementById('daily-safe').style.color = safeToSpendToday === 0 && weekRemaining < 0 ? 'var(--danger-red)' : 'var(--text-main)';
             
             // Render History
             const listEl = document.getElementById('expense-list');
