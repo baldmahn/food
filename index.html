@@ -289,7 +289,7 @@
             if (expenses.length === 0) {
                 listEl.innerHTML = '<li style="color: var(--text-muted); justify-content: center; padding: 20px 0;">No expenses yet.</li>';
             } else {
-                [...expenses].reverse().slice(0, 15).forEach(e => {
+                [...expenses].reverse().forEach(e => {
                     const dateStr = new Date(e.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                     const li = document.createElement('li');
                     li.innerHTML = `
