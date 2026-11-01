@@ -46,7 +46,7 @@
         .input-group { margin-bottom: 15px; }
         label { display: block; font-size: 0.75rem; color: #7A7A7A; margin-bottom: 8px; text-transform: uppercase; font-weight: 600; }
         
-        input[type="number"], select { 
+        input[type="text"], input[type="number"], select { 
             width: 100%; padding: 15px; border: 1px solid var(--border-light); 
             border-radius: 12px; background: var(--bg-color); font-size: 1rem; 
             outline: none; color: var(--text-main); 
@@ -171,7 +171,8 @@
 
         <div class="panel">
             <div class="input-group">
-                <label>Item Price</label>
+                <label>Add Item</label>
+                <input type="text" id="calc-name-input" placeholder="Item name (optional)" style="margin-bottom: 10px;">
                 <div style="display: flex; gap: 10px;">
                     <input type="number" id="calc-input" inputmode="decimal" placeholder="0.00" style="flex: 2;">
                     <button class="btn-large btn-primary" id="calc-add-btn" style="flex: 1; margin-top: 0; padding: 15px;">Add</button>
@@ -218,7 +219,7 @@
                 if (data && data.rates && data.rates.CAD) {
                     EXCHANGE_RATE = data.rates.CAD;
                     rateDisplay.innerText = `Live Rate: 1 DKK = ${EXCHANGE_RATE.toFixed(4)} CAD`;
-                    convertCurrency('DKK'); // Trigger conversion update if user already typed something
+                    convertCurrency('DKK'); 
                 }
             } catch (error) {
                 rateDisplay.innerText = `Offline Rate: 1 DKK = ${EXCHANGE_RATE} CAD`;
@@ -228,15 +229,12 @@
 
         // Tab Switching Logic
         function switchTab(tabId) {
-            // Hide all views, deactivate all buttons
             document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
             
-            // Activate requested tab
             document.getElementById(`view-${tabId}`).classList.add('active');
             document.getElementById(`tab-${tabId}`).classList.add('active');
 
-            // Move the Add Expense/History shared components between Month and Week views dynamically
             if (tabId === 'month' || tabId === 'week') {
                 const sharedNodes = document.querySelectorAll('.shared-component');
                 const targetContainer = tabId === 'month' ? document.getElementById('view-month') : document.getElementById('week-shared-container');
@@ -244,7 +242,6 @@
             }
         }
 
-        // Toast Notification
         function showToast(msg) {
             const toast = document.getElementById('toast');
             toast.innerText = msg;
@@ -253,7 +250,7 @@
         }
 
         // -----------------------
-        // BUDGET ENGINE
+        // BUDGET ENGINE (FIXED MATH)
         // -----------------------
         document.getElementById('set-budget-btn').addEventListener('click', () => {
             const inputVal = document.getElementById('monthly-budget-input').value;
@@ -291,11 +288,7 @@
             const currentMonth = now.getMonth();
             const currentYear = now.getFullYear();
             
-            // 1. Exact Month boundaries
-            const startOfMonth = new Date(currentYear, currentMonth, 1);
-            const monthEnd = new Date(currentYear, currentMonth + 1, 0);
-            monthEnd.setHours(23, 59, 59, 999);
-            
+            // 1. Current Month Stats
             const monthExpenses = expenses.filter(e => {
                 const d = new Date(e.date);
                 return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
@@ -303,7 +296,7 @@
             const monthSpent = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
             const monthRemaining = monthlyBudget - monthSpent;
             
-            // 2. Week boundaries (Mon - Sun)
+            // 2. Strict 7-Day Week Boundaries (Mon - Sun)
             const startOfWeek = new Date(now);
             const dayOfWeek = startOfWeek.getDay(); 
             const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
@@ -314,23 +307,30 @@
             endOfWeek.setDate(startOfWeek.getDate() + 6);
             endOfWeek.setHours(23, 59, 59, 999);
             
-            // 3. Smooth Weekly Allowance (Handles Month Overlaps)
-            const overlapStart = Math.max(startOfWeek.getTime(), startOfMonth.getTime());
-            const overlapEnd = Math.min(endOfWeek.getTime(), monthEnd.getTime());
-            const daysInThisWeek = Math.round((overlapEnd - overlapStart) / 86400000);
+            // 3. Anchor the weekly allowance to the month that Monday falls in
+            const anchorMonth = startOfWeek.getMonth();
+            const anchorYear = startOfWeek.getFullYear();
             
-            const effectiveStartOfWeek = new Date(overlapStart);
-            const pastExpenses = monthExpenses.filter(e => new Date(e.date) < effectiveStartOfWeek);
+            // Calculate what was spent in that anchor month BEFORE Monday
+            const pastExpenses = expenses.filter(e => {
+                const d = new Date(e.date);
+                return d.getMonth() === anchorMonth && 
+                       d.getFullYear() === anchorYear && 
+                       d < startOfWeek;
+            });
             const pastSpent = pastExpenses.reduce((sum, e) => sum + e.amount, 0);
-            
             const budgetAtStartOfWeek = monthlyBudget - pastSpent;
-            const daysLeftFromStart = Math.round((monthEnd.getTime() - overlapStart) / 86400000);
             
+            // Days remaining in that anchor month from Monday
+            const daysInAnchorMonth = new Date(anchorYear, anchorMonth + 1, 0).getDate();
+            const daysLeftFromStart = daysInAnchorMonth - startOfWeek.getDate() + 1;
+            
+            // Daily pace based on Monday's snapshot * full 7 day week
             const dailyRateAtStartOfWeek = Math.max(0, budgetAtStartOfWeek) / daysLeftFromStart;
-            const weeklyBudget = dailyRateAtStartOfWeek * daysInThisWeek;
+            const weeklyBudget = dailyRateAtStartOfWeek * 7;
             
-            // 4. Current Week Expenditures
-            const weekExpenses = monthExpenses.filter(e => {
+            // 4. Current Week Expenditures (Includes expenses across month boundaries)
+            const weekExpenses = expenses.filter(e => {
                 const d = new Date(e.date);
                 return d >= startOfWeek && d <= endOfWeek;
             });
@@ -338,10 +338,9 @@
             const weekRemaining = weeklyBudget - weekSpent;
             
             // 5. Daily Safe to Spend Pacing
-            const today = new Date(now);
-            today.setHours(0, 0, 0, 0);
-            const daysLeftInWeek = Math.round((overlapEnd - Math.max(overlapStart, today.getTime())) / 86400000);
-            const safeToSpendToday = weekRemaining > 0 ? weekRemaining / Math.max(1, daysLeftInWeek) : 0;
+            const todayDOW = now.getDay() === 0 ? 7 : now.getDay(); // Mon=1 ... Sun=7
+            const safeDaysLeftInWeek = 7 - todayDOW + 1; // e.g. Sunday = 1 day left (today)
+            const safeToSpendToday = weekRemaining > 0 ? weekRemaining / safeDaysLeftInWeek : 0;
 
             // DOM Updates
             document.getElementById('month-total').textContent = monthlyBudget.toFixed(2);
@@ -399,14 +398,22 @@
         // CALCULATOR ENGINE
         // -----------------------
         document.getElementById('calc-add-btn').addEventListener('click', () => {
-            const input = document.getElementById('calc-input');
-            const val = parseFloat(input.value);
+            const priceInput = document.getElementById('calc-input');
+            const nameInput = document.getElementById('calc-name-input');
+            
+            const val = parseFloat(priceInput.value);
+            const nameVal = nameInput.value.trim();
             
             if (!isNaN(val) && val > 0) {
-                calcItems.push(val);
-                input.value = '';
+                calcItems.push({
+                    name: nameVal,
+                    price: val
+                });
+                
+                priceInput.value = '';
+                nameInput.value = '';
                 updateCalcUI();
-                input.focus(); // Keep keyboard open for rapid entry
+                priceInput.focus(); // Keep keyboard open for rapid entry
             }
         });
 
@@ -430,14 +437,16 @@
                 return;
             }
 
-            calcItems.forEach((val, idx) => {
-                total += val;
+            calcItems.forEach((item, idx) => {
+                total += item.price;
+                const displayName = item.name ? item.name : `Item ${idx + 1}`;
+                
                 const li = document.createElement('li');
                 li.innerHTML = `
                     <div class="list-meta">
-                        <span class="list-title">Item ${idx + 1}</span>
+                        <span class="list-title">${displayName}</span>
                     </div>
-                    <div class="list-amount" style="color: var(--accent-green);">+${val.toFixed(2)}</div>
+                    <div class="list-amount" style="color: var(--accent-green);">+${item.price.toFixed(2)}</div>
                 `;
                 list.appendChild(li);
             });
